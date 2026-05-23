@@ -1,0 +1,63 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: copilot-db
+    environment:
+      POSTGRES_USER: copilot
+      POSTGRES_PASSWORD: copilot
+      POSTGRES_DB: copilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U copilot -d copilot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./apps/backend
+    container_name: copilot-backend
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://copilot:copilot@db:5432/copilot}
+      CHAT_MODEL: ${CHAT_MODEL:-gpt-4.1-mini}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
+      WEB_FALLBACK_ENABLED: ${WEB_FALLBACK_ENABLED:-true}
+      WEB_FALLBACK_CONFIDENCE_THRESHOLD: ${WEB_FALLBACK_CONFIDENCE_THRESHOLD:-0.35}
+      WEB_FALLBACK_MAX_REFERENCES: ${WEB_FALLBACK_MAX_REFERENCES:-5}
+      SYNC_SCHEDULER_ENABLED: ${SYNC_SCHEDULER_ENABLED:-true}
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-60}
+      SYNC_ON_STARTUP: ${SYNC_ON_STARTUP:-false}
+      CONFLUENCE_ENABLED: ${CONFLUENCE_ENABLED:-false}
+      CONFLUENCE_BASE_URL: ${CONFLUENCE_BASE_URL:-}
+      CONFLUENCE_EMAIL: ${CONFLUENCE_EMAIL:-}
+      CONFLUENCE_API_TOKEN: ${CONFLUENCE_API_TOKEN:-}
+      CONFLUENCE_SPACE_KEYS: ${CONFLUENCE_SPACE_KEYS:-}
+      CONFLUENCE_PAGE_LIMIT: ${CONFLUENCE_PAGE_LIMIT:-25}
+      NOTION_ENABLED: ${NOTION_ENABLED:-false}
+      NOTION_API_TOKEN: ${NOTION_API_TOKEN:-}
+      NOTION_DATABASE_IDS: ${NOTION_DATABASE_IDS:-}
+      NOTION_PAGE_LIMIT: ${NOTION_PAGE_LIMIT:-25}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./apps/frontend
+    container_name: copilot-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
