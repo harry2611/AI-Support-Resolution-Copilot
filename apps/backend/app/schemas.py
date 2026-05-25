@@ -48,6 +48,7 @@ class ChatResponse(BaseModel):
     query_log_id: str
     grounded: bool
     applied_source_filters: list[str] = Field(default_factory=list)
+    guardrail_events: list[str] = Field(default_factory=list)
 
 
 class TicketDraftRequest(BaseModel):
@@ -62,6 +63,7 @@ class TicketDraftResponse(BaseModel):
     citations: list[Citation]
     grounded: bool
     applied_source_filters: list[str] = Field(default_factory=list)
+    guardrail_events: list[str] = Field(default_factory=list)
 
 
 class FeedbackRequest(BaseModel):
@@ -133,6 +135,13 @@ class EvalRunRequest(BaseModel):
     case_ids: list[str] = Field(default_factory=list)
 
 
+class RagasStyleMetrics(BaseModel):
+    answer_relevance: float
+    faithfulness: float
+    context_precision: float
+    context_recall: float
+
+
 class EvalSummaryResponse(BaseModel):
     run_id: str
     label: str
@@ -148,6 +157,9 @@ class EvalSummaryResponse(BaseModel):
     avg_latency_ms: float
     started_at: datetime
     finished_at: datetime | None
+    ragas_style_metrics: RagasStyleMetrics | None = None
+    langsmith_tracing_enabled: bool = False
+    langsmith_project: str | None = None
 
 
 class EvalCaseResultResponse(BaseModel):
@@ -168,6 +180,7 @@ class EvalCaseResultResponse(BaseModel):
     matched_sources: list[str]
     citations: list[Citation]
     notes: str | None
+    ragas_style_metrics: RagasStyleMetrics | None = None
 
 
 class EvalRunDetailResponse(EvalSummaryResponse):

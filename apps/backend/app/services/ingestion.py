@@ -5,6 +5,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.config import get_settings
 from app import models
 from app.schemas import DocumentInput
+from app.services.guardrails import GuardrailService
 from app.services.llm import LLMService
 from sqlalchemy.orm import Session
 
@@ -29,19 +30,23 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
 def ingest_documents(db: Session, documents: list[DocumentInput], llm_service: LLMService) -> tuple[int, int]:
     ingested_docs = 0
     ingested_chunks = 0
+    guardrails = GuardrailService()
 
     for payload in documents:
+        sanitized_document = guardrails.sanitize_document_text(payload.content)
+        sanitized_content = sanitized_document.sanitized_text
+
         doc = models.Document(
             title=payload.title,
             source=payload.source,
-            content=payload.content,
+            content=sanitized_content,
             tags=payload.tags,
         )
         db.add(doc)
         db.flush()
 
         chunks = chunk_text(
-            payload.content,
+            sanitized_content,
             chunk_size=settings.chunk_size,
             overlap=settings.chunk_overlap,
         )

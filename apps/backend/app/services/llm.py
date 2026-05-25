@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import os
 import re
 from dataclasses import dataclass
 from typing import Iterable
@@ -12,6 +13,19 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from openai import OpenAI
 
 from app.config import get_settings
+
+try:
+    from langsmith import traceable
+    from langsmith.wrappers import wrap_openai
+except Exception:  # pragma: no cover - optional dependency
+    def traceable(*args, **kwargs):  # type: ignore[override]
+        def decorator(func):
+            return func
+
+        return decorator
+
+    def wrap_openai(client):  # type: ignore[override]
+        return client
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -26,7 +40,12 @@ class WebReference:
 
 class LLMService:
     def __init__(self) -> None:
-        self.client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        if settings.langsmith_tracing_enabled:
+            os.environ.setdefault("LANGSMITH_TRACING", "true")
+            os.environ.setdefault("LANGSMITH_PROJECT", settings.langsmith_project)
+
+        base_client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        self.client = wrap_openai(base_client) if settings.langsmith_tracing_enabled and base_client else base_client
         self.embedding_client = (
             OpenAIEmbeddings(model=settings.embedding_model, api_key=settings.openai_api_key)
             if settings.openai_api_key
@@ -38,6 +57,7 @@ class LLMService:
             else None
         )
 
+    @traceable(name="resolveai-embed-texts", run_type="embedding")
     def embed_texts(self, texts: Iterable[str]) -> list[list[float]]:
         text_list = list(texts)
         if not text_list:
@@ -62,6 +82,7 @@ class LLMService:
             # Fallback keeps local development unblocked when API is unavailable.
             return [self._hash_embedding(text) for text in text_list]
 
+    @traceable(name="resolveai-generate-answer", run_type="chain")
     def generate_answer(self, question: str, context_blocks: list[str]) -> str:
         if not context_blocks:
             return (
@@ -123,6 +144,7 @@ class LLMService:
         except Exception:
             return self._fallback_context_answer(question, context_blocks)
 
+    @traceable(name="resolveai-web-fallback", run_type="chain")
     def generate_answer_with_web_fallback(
         self,
         question: str,
@@ -193,6 +215,7 @@ class LLMService:
             return self.generate_answer(question, context_blocks), [], False, str(last_exception)
         return self.generate_answer(question, context_blocks), [], False, "Unknown web fallback failure"
 
+    @traceable(name="resolveai-ticket-draft", run_type="chain")
     def generate_ticket_draft(self, customer_message: str, context_blocks: list[str]) -> str:
         context = "\n\n".join(context_blocks)
         prompt = ChatPromptTemplate.from_messages(

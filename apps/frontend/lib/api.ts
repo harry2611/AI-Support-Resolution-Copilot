@@ -14,6 +14,7 @@ export type ChatResponse = {
   query_log_id: string;
   grounded: boolean;
   applied_source_filters: string[];
+  guardrail_events: string[];
 };
 
 export type TicketDraftResponse = {
@@ -22,6 +23,7 @@ export type TicketDraftResponse = {
   citations: Citation[];
   grounded: boolean;
   applied_source_filters: string[];
+  guardrail_events: string[];
 };
 
 export type DocumentSummary = {
@@ -88,6 +90,14 @@ export type EvalSummary = {
   avg_latency_ms: number;
   started_at: string;
   finished_at: string | null;
+  ragas_style_metrics?: {
+    answer_relevance: number;
+    faithfulness: number;
+    context_precision: number;
+    context_recall: number;
+  } | null;
+  langsmith_tracing_enabled?: boolean;
+  langsmith_project?: string | null;
 };
 
 export type EvalCaseResult = {
@@ -108,6 +118,12 @@ export type EvalCaseResult = {
   matched_sources: string[];
   citations: Citation[];
   notes: string | null;
+  ragas_style_metrics?: {
+    answer_relevance: number;
+    faithfulness: number;
+    context_precision: number;
+    context_recall: number;
+  } | null;
 };
 
 export type EvalRunDetail = EvalSummary & {

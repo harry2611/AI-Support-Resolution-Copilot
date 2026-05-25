@@ -246,7 +246,7 @@ export default function AdminPage() {
 
       <section className="card">
         <h2>Evaluation Lab</h2>
-        <p className="meta">Benchmark retrieval precision, answer coverage, and hallucination risk.</p>
+        <p className="meta">Benchmark retrieval precision, answer coverage, hallucination risk, and RAGAs-style quality signals.</p>
 
         <label htmlFor="eval-name">Benchmark case name</label>
         <input
@@ -354,6 +354,11 @@ export default function AdminPage() {
             <p className="meta">
               grounding {run.avg_grounding_score}, hallucination risk {run.avg_hallucination_risk}, latency {run.avg_latency_ms} ms
             </p>
+            {run.ragas_style_metrics ? (
+              <p className="meta">
+                answer relevance {run.ragas_style_metrics.answer_relevance}, faithfulness {run.ragas_style_metrics.faithfulness}
+              </p>
+            ) : null}
           </div>
         ))}
 
@@ -388,6 +393,34 @@ export default function AdminPage() {
               <span>Hallucination Risk</span>
               <strong>{selectedEvalRun.avg_hallucination_risk}</strong>
             </div>
+            {selectedEvalRun.ragas_style_metrics ? (
+              <>
+                <div className="metric">
+                  <span>Answer Relevance</span>
+                  <strong>{selectedEvalRun.ragas_style_metrics.answer_relevance}</strong>
+                </div>
+                <div className="metric">
+                  <span>Faithfulness</span>
+                  <strong>{selectedEvalRun.ragas_style_metrics.faithfulness}</strong>
+                </div>
+                <div className="metric">
+                  <span>Context Precision</span>
+                  <strong>{selectedEvalRun.ragas_style_metrics.context_precision}</strong>
+                </div>
+                <div className="metric">
+                  <span>Context Recall</span>
+                  <strong>{selectedEvalRun.ragas_style_metrics.context_recall}</strong>
+                </div>
+              </>
+            ) : null}
+            <div className="metric">
+              <span>LangSmith Tracing</span>
+              <strong>
+                {selectedEvalRun.langsmith_tracing_enabled
+                  ? `enabled${selectedEvalRun.langsmith_project ? ` (${selectedEvalRun.langsmith_project})` : ""}`
+                  : "disabled"}
+              </strong>
+            </div>
 
             <h3>Case Results</h3>
             {selectedEvalRun.results.map((result) => (
@@ -400,6 +433,13 @@ export default function AdminPage() {
                   precision {result.precision_at_k}, recall {result.recall_at_k}, grounding {result.grounding_score}, hallucination risk{" "}
                   {result.hallucination_risk}
                 </p>
+                {result.ragas_style_metrics ? (
+                  <p className="meta">
+                    answer relevance {result.ragas_style_metrics.answer_relevance}, faithfulness {result.ragas_style_metrics.faithfulness},
+                    context precision {result.ragas_style_metrics.context_precision}, context recall{" "}
+                    {result.ragas_style_metrics.context_recall}
+                  </p>
+                ) : null}
                 <p>{result.generated_answer}</p>
                 {result.notes ? <p className="meta">notes: {result.notes}</p> : null}
               </div>

@@ -110,7 +110,8 @@ export default function HomePage() {
         latency_ms: 0,
         query_log_id: "",
         grounded: false,
-        applied_source_filters: selectedSources
+        applied_source_filters: selectedSources,
+        guardrail_events: []
       });
     } finally {
       setIsAsking(false);
@@ -129,7 +130,8 @@ export default function HomePage() {
         response: `Draft generation failed: ${(error as Error).message}`,
         citations: [],
         grounded: false,
-        applied_source_filters: selectedSources
+        applied_source_filters: selectedSources,
+        guardrail_events: []
       });
     } finally {
       setIsDrafting(false);
@@ -315,6 +317,9 @@ export default function HomePage() {
             <p className="meta">
               Confidence: <span className="badge">{chatResult.confidence}</span> | Latency: {chatResult.latency_ms} ms
             </p>
+            {chatResult.guardrail_events.length > 0 ? (
+              <p className="meta">Guardrails: {chatResult.guardrail_events.join(", ")}</p>
+            ) : null}
             {chatResult.applied_source_filters.length > 0 ? (
               <p className="meta">Source filters: {chatResult.applied_source_filters.join(", ")}</p>
             ) : null}
@@ -373,6 +378,9 @@ export default function HomePage() {
               {ticketResult.grounded ? "Grounded draft" : "Draft blocked due to weak evidence"}
             </p>
             <p className="response-body">{ticketResult.response}</p>
+            {ticketResult.guardrail_events.length > 0 ? (
+              <p className="meta">Guardrails: {ticketResult.guardrail_events.join(", ")}</p>
+            ) : null}
             {ticketResult.applied_source_filters.length > 0 ? (
               <p className="meta">Source filters: {ticketResult.applied_source_filters.join(", ")}</p>
             ) : null}

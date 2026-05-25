@@ -16,11 +16,40 @@ ResolveAI is a full-stack semantic search and support-resolution platform built 
 
 ![Admin Dashboard + Evaluation Lab](output/playwright/admin-eval-lab.png)
 
-## Architecture
+## System Design
 
-- `apps/frontend`: Next.js dashboard for ingestion, Q&A, ticket drafting, and metrics.
-- `apps/backend`: FastAPI API for ingestion, retrieval, chat, ticket draft generation, feedback, and metrics.
-- `Postgres + pgvector`: stores documents/chunks and vector embeddings.
+```mermaid
+flowchart LR
+  user["Support Agent / Admin"] --> frontend["Next.js Workspace + Admin"]
+  frontend --> api["FastAPI API Layer"]
+
+  api --> guardrails["Guardrail Layer<br/>PII masking · prompt-injection checks · policy filters"]
+  guardrails --> ingestion["Ingestion Pipeline<br/>paste text · file upload · connector sync"]
+  guardrails --> retrieval["Hybrid Retrieval + Agentic Answer Flow"]
+
+  ingestion --> chunking["Chunking + Embeddings<br/>LangChain + OpenAI"]
+  chunking --> db["PostgreSQL + pgvector<br/>documents · chunks · feedback · eval runs"]
+
+  retrieval --> rerank["Semantic search + lexical search + reranking"]
+  rerank --> db
+  retrieval --> llm["LLM Orchestration<br/>LangChain / OpenAI Responses"]
+  llm --> frontend
+
+  frontend --> evals["Evaluation Lab"]
+  evals --> api
+  api --> benchmark["Benchmark Runner<br/>precision@k · recall@k · grounding · RAGAs-style metrics"]
+  benchmark --> db
+  benchmark --> langsmith["LangSmith Traces + Eval Metadata"]
+
+  connectors["Confluence / Notion Connectors"] --> api
+```
+
+### Architecture Notes
+
+- `apps/frontend`: Next.js workspace for ingestion, grounded Q&A, ticket drafting, sync controls, and eval inspection.
+- `apps/backend`: FastAPI API for ingestion, retrieval, chat, ticket drafting, feedback, sync orchestration, guardrails, and evaluation runs.
+- `PostgreSQL + pgvector`: stores documents, chunks, embeddings, query logs, ticket drafts, feedback, and benchmark metadata.
+- `LangChain + OpenAI`: used for chunking, embeddings, LLM generation, and LangSmith-compatible tracing hooks.
 
 ## Core Features
 
@@ -32,7 +61,17 @@ ResolveAI is a full-stack semantic search and support-resolution platform built 
 6. Connector sync for Confluence + Notion with scheduled incremental ingestion.
 7. Ops metrics (`/api/metrics`) and feedback capture (`/api/feedback`).
 8. Evaluation Lab (`/api/evals/*`) for benchmark cases, retrieval hit rate, precision@k, recall@k, answer coverage, grounding score, and heuristic hallucination risk.
-9. Source-filtered retrieval, reranking, and low-confidence guardrails to block weak answers and weak customer drafts.
+9. RAGAs-style evaluation metrics for answer relevance, faithfulness, context precision, and context recall.
+10. LangSmith-compatible tracing hooks for embeddings, answer generation, ticket drafting, and benchmark runs.
+11. Guardrails for PII masking, prompt-injection detection, and policy-based blocking.
+12. Source-filtered retrieval, reranking, and low-confidence guardrails to block weak answers and weak customer drafts.
+
+## Production-Grade Highlights
+
+- End-to-end support-resolution workflow: ingestion, retrieval, grounded answering, ticket drafting, feedback capture, and benchmarking in one stack.
+- Safety-first response path: weak retrieval is blocked, sensitive patterns are masked, and suspicious prompts are filtered before generation.
+- Quality observability built in: benchmark runs track retrieval quality, grounding, hallucination risk, and RAGAs-style answer metrics.
+- Traceable LLM flows: LangSmith hooks make generation and eval runs inspectable when tracing is enabled.
 
 ## Local Run (Docker)
 
@@ -73,6 +112,26 @@ From the workspace UI you can now upload:
 - `.docx`
 
 The backend extracts text, chunks it, embeds it, and stores it in Postgres/pgvector through the same ingestion pipeline used for pasted text.
+
+### Guardrails + tracing configuration
+
+Optional `.env` flags:
+
+```env
+GUARDRAILS_ENABLED=true
+PII_MASKING_ENABLED=true
+PROMPT_INJECTION_DETECTION_ENABLED=true
+POLICY_FILTERING_ENABLED=true
+LANGSMITH_TRACING_ENABLED=false
+LANGSMITH_PROJECT=resolveai
+LANGSMITH_API_KEY=
+```
+
+- `GUARDRAILS_ENABLED`: enables the safety layer for ingestion, Q&A, and ticket drafting.
+- `PII_MASKING_ENABLED`: redacts emails, phone numbers, tokens, card-like strings, and similar sensitive values.
+- `PROMPT_INJECTION_DETECTION_ENABLED`: blocks obvious “ignore instructions / reveal system prompt” style attacks.
+- `POLICY_FILTERING_ENABLED`: blocks secret-exfiltration and data-dump style requests.
+- `LANGSMITH_TRACING_ENABLED`: emits LangSmith traces for embeddings, generation, and benchmark runs when `LANGSMITH_API_KEY` is configured.
 
 ## Connector Sync Setup
 
@@ -176,6 +235,17 @@ curl http://localhost:8000/api/evals/runs
 curl http://localhost:8000/api/evals/runs/<run_id>
 ```
 
+Each eval run reports:
+- retrieval hit rate
+- precision@k / recall@k
+- answer coverage
+- grounding score
+- hallucination risk
+- RAGAs-style answer relevance
+- RAGAs-style faithfulness
+- RAGAs-style context precision / context recall
+- LangSmith tracing metadata when enabled
+
 ## Cloud Deployment
 
 ## Option A: One-command VM deploy (Docker)
@@ -209,6 +279,13 @@ docker compose up -d --build
 - `CHAT_MODEL`
 - `EMBEDDING_MODEL`
 - `CORS_ORIGINS` (include frontend URL)
+- `GUARDRAILS_ENABLED`
+- `PII_MASKING_ENABLED`
+- `PROMPT_INJECTION_DETECTION_ENABLED`
+- `POLICY_FILTERING_ENABLED`
+- `LANGSMITH_TRACING_ENABLED`
+- `LANGSMITH_PROJECT`
+- `LANGSMITH_API_KEY`
 - Optional connector sync vars:
   - `SYNC_SCHEDULER_ENABLED`
   - `SYNC_INTERVAL_MINUTES`
@@ -227,17 +304,10 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
 - `NEXT_PUBLIC_API_URL=https://api.yourdomain.com`
 3. Redeploy.
 
-## Resume Positioning
+## What This Project Demonstrates
 
-Use quantified bullets after you test on sample ticket data:
-- Reduced support triage time by `X%` using hybrid RAG with citation-grounded answers.
-- Built FastAPI + Next.js + Postgres(pgvector) stack with production deployment.
-- Implemented human-reviewed ticket drafting and quality feedback loops.
-- Added retrieval observability (confidence, latency, coverage metrics).
-
-## Suggested Next Upgrades
-
-1. Add LangSmith traces/evaluations and RAGAs-style scoring alongside the built-in benchmark lab.
-2. Add Zendesk/Jira connectors with the same incremental sync contract.
-3. Add role-based access control and tenant-level data isolation.
-4. Add guardrails (PII masking, prompt-injection checks, policy filters).
+- Full-stack AI product engineering across Next.js, FastAPI, Postgres, pgvector, LangChain, and Docker.
+- Production-minded RAG design with ingestion, retrieval, reranking, source scoping, and low-confidence blocking.
+- AI quality engineering through benchmark cases, retrieval metrics, grounded-answer checks, and RAGAs-style scoring.
+- AI safety engineering through prompt-injection checks, PII masking, and policy filters.
+- LLM observability with LangSmith-ready tracing and evaluation metadata.

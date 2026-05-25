@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import math
 import re
 import time
 import uuid
@@ -10,8 +12,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
+from app.config import get_settings
 from app.services.llm import LLMService
 from app.services.retrieval import RetrievalService
+
+try:
+    from langsmith import traceable
+except Exception:  # pragma: no cover - optional dependency
+    def traceable(*args, **kwargs):  # type: ignore[override]
+        def decorator(func):
+            return func
+
+        return decorator
 
 
 STOPWORDS = {
@@ -39,6 +51,7 @@ STOPWORDS = {
     "with",
     "your",
 }
+settings = get_settings()
 
 
 @dataclass
@@ -50,6 +63,10 @@ class EvalAggregate:
     avg_grounding_score: float
     avg_hallucination_risk: float
     avg_latency_ms: float
+    avg_answer_relevance: float
+    avg_faithfulness: float
+    avg_context_precision: float
+    avg_context_recall: float
 
 
 class EvalService:
@@ -79,6 +96,7 @@ class EvalService:
         stmt = select(models.EvalBenchmarkCase).order_by(models.EvalBenchmarkCase.created_at.desc())
         return self.db.execute(stmt).scalars().all()
 
+    @traceable(name="resolveai-run-benchmark", run_type="chain")
     def run_benchmark(self, label: str, top_k: int, case_ids: list[str] | None = None) -> models.EvalRun:
         cases = self._load_cases(case_ids or [])
         if not cases:
@@ -89,7 +107,13 @@ class EvalService:
             status="running",
             top_k=top_k,
             total_cases=len(cases),
-            metadata_json={"case_ids": [str(case.id) for case in cases]},
+            metadata_json={
+                "case_ids": [str(case.id) for case in cases],
+                "langsmith": {
+                    "tracing_enabled": settings.langsmith_tracing_enabled,
+                    "project": settings.langsmith_project if settings.langsmith_tracing_enabled else None,
+                },
+            },
         )
         self.db.add(run)
         self.db.flush()
@@ -110,6 +134,15 @@ class EvalService:
         run.avg_grounding_score = aggregate.avg_grounding_score
         run.avg_hallucination_risk = aggregate.avg_hallucination_risk
         run.avg_latency_ms = aggregate.avg_latency_ms
+        run.metadata_json = {
+            **(run.metadata_json or {}),
+            "ragas_style_metrics": {
+                "answer_relevance": aggregate.avg_answer_relevance,
+                "faithfulness": aggregate.avg_faithfulness,
+                "context_precision": aggregate.avg_context_precision,
+                "context_recall": aggregate.avg_context_recall,
+            },
+        }
         run.finished_at = datetime.now(timezone.utc)
 
         self.db.commit()
@@ -169,10 +202,17 @@ class EvalService:
         answer_coverage = self._coverage_score(answer, case.expected_answer_points or case.expected_keywords)
         grounding_score = self._grounding_score(answer, context_blocks)
         hallucination_risk = round(max(0.0, 1.0 - grounding_score), 3)
+        answer_relevance = self._answer_relevance_score(case.question, answer)
+        ragas_style_metrics = {
+            "answer_relevance": answer_relevance,
+            "faithfulness": grounding_score,
+            "context_precision": precision_at_k,
+            "context_recall": recall_at_k,
+        }
 
-        notes = None
+        note_message = None
         if not (case.expected_titles or case.expected_sources or case.expected_keywords or case.expected_answer_points):
-            notes = "No expected references or answer points defined for this benchmark case."
+            note_message = "No expected references or answer points defined for this benchmark case."
 
         citations_json = [
             {
@@ -201,7 +241,7 @@ class EvalService:
             matched_titles=matched_titles,
             matched_sources=matched_sources,
             citations_json=citations_json,
-            notes=notes,
+            notes=self._serialize_case_notes(note_message, ragas_style_metrics),
         )
 
     def _match_retrieved_chunks(
@@ -276,9 +316,10 @@ class EvalService:
 
     def _aggregate_results(self, results: list[models.EvalCaseResult]) -> EvalAggregate:
         if not results:
-            return EvalAggregate(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            return EvalAggregate(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
         total = len(results)
+        ragas_metrics = [self.extract_ragas_style_metrics(item.notes) for item in results]
         return EvalAggregate(
             retrieval_hit_rate=round(sum(1 for item in results if item.retrieval_hit) / total, 3),
             avg_precision_at_k=round(sum(item.precision_at_k for item in results) / total, 3),
@@ -287,6 +328,10 @@ class EvalService:
             avg_grounding_score=round(sum(item.grounding_score for item in results) / total, 3),
             avg_hallucination_risk=round(sum(item.hallucination_risk for item in results) / total, 3),
             avg_latency_ms=round(sum(item.latency_ms for item in results) / total, 2),
+            avg_answer_relevance=round(sum(item["answer_relevance"] for item in ragas_metrics) / total, 3),
+            avg_faithfulness=round(sum(item["faithfulness"] for item in ragas_metrics) / total, 3),
+            avg_context_precision=round(sum(item["context_precision"] for item in ragas_metrics) / total, 3),
+            avg_context_recall=round(sum(item["context_recall"] for item in ragas_metrics) / total, 3),
         )
 
     def _normalize(self, value: str) -> str:
@@ -295,3 +340,56 @@ class EvalService:
     def _significant_tokens(self, value: str) -> set[str]:
         tokens = re.findall(r"[a-z0-9]+", value.lower())
         return {token for token in tokens if len(token) > 2 and token not in STOPWORDS}
+
+    def _answer_relevance_score(self, question: str, answer: str) -> float:
+        if not question.strip() or not answer.strip():
+            return 0.0
+
+        question_embedding, answer_embedding = self.llm_service.embed_texts([question, answer])
+        similarity = self._cosine_similarity(question_embedding, answer_embedding)
+        return round(max(0.0, min(1.0, similarity)), 3)
+
+    def _cosine_similarity(self, left: list[float], right: list[float]) -> float:
+        numerator = sum(a * b for a, b in zip(left, right, strict=False))
+        left_norm = math.sqrt(sum(value * value for value in left)) or 1.0
+        right_norm = math.sqrt(sum(value * value for value in right)) or 1.0
+        return numerator / (left_norm * right_norm)
+
+    def _serialize_case_notes(self, message: str | None, ragas_style_metrics: dict[str, float]) -> str:
+        return json.dumps(
+            {
+                "message": message,
+                "ragas_style_metrics": ragas_style_metrics,
+            }
+        )
+
+    def extract_ragas_style_metrics(self, notes: str | None) -> dict[str, float]:
+        defaults = {
+            "answer_relevance": 0.0,
+            "faithfulness": 0.0,
+            "context_precision": 0.0,
+            "context_recall": 0.0,
+        }
+        if not notes:
+            return defaults
+        try:
+            parsed = json.loads(notes)
+        except json.JSONDecodeError:
+            return defaults
+
+        metrics = parsed.get("ragas_style_metrics") or {}
+        return {
+            "answer_relevance": round(float(metrics.get("answer_relevance", 0.0)), 3),
+            "faithfulness": round(float(metrics.get("faithfulness", 0.0)), 3),
+            "context_precision": round(float(metrics.get("context_precision", 0.0)), 3),
+            "context_recall": round(float(metrics.get("context_recall", 0.0)), 3),
+        }
+
+    def extract_note_message(self, notes: str | None) -> str | None:
+        if not notes:
+            return None
+        try:
+            parsed = json.loads(notes)
+        except json.JSONDecodeError:
+            return notes
+        return parsed.get("message")

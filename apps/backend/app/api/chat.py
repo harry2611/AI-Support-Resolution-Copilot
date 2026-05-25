@@ -7,6 +7,7 @@ from app import models
 from app.config import get_settings
 from app.database import get_db
 from app.schemas import ChatRequest, ChatResponse, Citation
+from app.services.guardrails import GuardrailService
 from app.services.llm import LLMService
 from app.services.retrieval import RetrievalService
 
@@ -18,13 +19,46 @@ settings = get_settings()
 def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     started = time.perf_counter()
     source_filters = [item.strip() for item in payload.source_filters if item.strip()]
+    guardrails = GuardrailService()
+    question_guardrails = guardrails.sanitize_user_text(payload.question)
+    guardrail_events = question_guardrails.events()
 
     llm_service = LLMService()
     retrieval = RetrievalService(db, llm_service)
 
-    chunks = retrieval.retrieve(payload.question, top_k=payload.top_k, source_filters=source_filters)
+    if question_guardrails.blocked:
+        answer = (
+            "I can help with grounded support questions, but I can’t process this request because it triggered "
+            "prompt-injection or policy-protection checks. Please rephrase it as a normal support or retrieval query."
+        )
+        sanitized_answer = guardrails.sanitize_output_text(answer).sanitized_text
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        query_log = models.QueryLog(
+            question=question_guardrails.sanitized_text,
+            answer=sanitized_answer,
+            latency_ms=latency_ms,
+            confidence=0.0,
+            num_citations=0,
+        )
+        db.add(query_log)
+        db.commit()
+        db.refresh(query_log)
+        return ChatResponse(
+            answer=sanitized_answer,
+            citations=[],
+            confidence=0.0,
+            latency_ms=latency_ms,
+            query_log_id=str(query_log.id),
+            grounded=False,
+            applied_source_filters=source_filters,
+            guardrail_events=guardrail_events,
+        )
+
+    chunks = retrieval.retrieve(question_guardrails.sanitized_text, top_k=payload.top_k, source_filters=source_filters)
     confidence = retrieval.confidence_score(chunks)
     context_blocks = retrieval.format_context_blocks(chunks)
+    context_blocks, context_events = guardrails.sanitize_context_blocks(context_blocks)
+    guardrail_events.extend(context_events)
     grounded = confidence >= settings.minimum_grounded_confidence
     should_use_web_fallback = (
         settings.web_fallback_enabled
@@ -36,11 +70,15 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 
     if should_use_web_fallback:
         answer, web_references, used_web_fallback, web_fallback_error = llm_service.generate_answer_with_web_fallback(
-            payload.question,
+            question_guardrails.sanitized_text,
             context_blocks,
         )
     else:
-        answer = llm_service.generate_answer(payload.question, context_blocks)
+        answer = llm_service.generate_answer(question_guardrails.sanitized_text, context_blocks)
+
+    output_guardrails = guardrails.sanitize_output_text(answer)
+    answer = output_guardrails.sanitized_text
+    guardrail_events.extend(output_guardrails.events())
 
     latency_ms = int((time.perf_counter() - started) * 1000)
 
@@ -49,7 +87,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
             chunk_id=str(chunk.chunk_id),
             title=chunk.title,
             source=chunk.source,
-            snippet=llm_service.clean_display_text(chunk.content)[:220],
+            snippet=guardrails.sanitize_output_text(llm_service.clean_display_text(chunk.content)[:220]).sanitized_text,
             score=chunk.score,
         )
         for chunk in chunks
@@ -103,7 +141,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         )
 
     query_log = models.QueryLog(
-        question=payload.question,
+        question=question_guardrails.sanitized_text,
         answer=answer,
         latency_ms=latency_ms,
         confidence=confidence,
@@ -121,4 +159,5 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         query_log_id=str(query_log.id),
         grounded=grounded,
         applied_source_filters=source_filters,
+        guardrail_events=sorted(set(guardrail_events)),
     )

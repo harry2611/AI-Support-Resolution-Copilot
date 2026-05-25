@@ -8,6 +8,7 @@ openai==1.66.2
 langchain==0.3.23
 langchain-openai==0.3.8
 langchain-text-splitters==0.3.8
+langsmith==0.3.18
 apscheduler==3.10.4
 requests==2.32.3
 python-multipart==0.0.20

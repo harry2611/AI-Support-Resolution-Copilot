@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     web_fallback_max_references: int = 5
     minimum_grounded_confidence: float = 0.32
     minimum_ticket_grounded_confidence: float = 0.28
+    guardrails_enabled: bool = True
+    pii_masking_enabled: bool = True
+    prompt_injection_detection_enabled: bool = True
+    policy_filtering_enabled: bool = True
+    langsmith_tracing_enabled: bool = False
+    langsmith_project: str = "resolveai"
 
     sync_scheduler_enabled: bool = True
     sync_interval_minutes: int = 60
