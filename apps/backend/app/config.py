@@ -19,10 +19,13 @@ class Settings(BaseSettings):
 
     chunk_size: int = 900
     chunk_overlap: int = 150
+    upload_max_file_mb: int = 10
 
     web_fallback_enabled: bool = True
     web_fallback_confidence_threshold: float = 0.35
     web_fallback_max_references: int = 5
+    minimum_grounded_confidence: float = 0.32
+    minimum_ticket_grounded_confidence: float = 0.28
 
     sync_scheduler_enabled: bool = True
     sync_interval_minutes: int = 60

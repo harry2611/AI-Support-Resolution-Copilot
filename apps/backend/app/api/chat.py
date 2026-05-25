@@ -17,13 +17,15 @@ settings = get_settings()
 @router.post("", response_model=ChatResponse)
 def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     started = time.perf_counter()
+    source_filters = [item.strip() for item in payload.source_filters if item.strip()]
 
     llm_service = LLMService()
     retrieval = RetrievalService(db, llm_service)
 
-    chunks = retrieval.retrieve(payload.question, top_k=payload.top_k)
+    chunks = retrieval.retrieve(payload.question, top_k=payload.top_k, source_filters=source_filters)
     confidence = retrieval.confidence_score(chunks)
     context_blocks = retrieval.format_context_blocks(chunks)
+    grounded = confidence >= settings.minimum_grounded_confidence
     should_use_web_fallback = (
         settings.web_fallback_enabled
         and confidence < settings.web_fallback_confidence_threshold
@@ -47,7 +49,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
             chunk_id=str(chunk.chunk_id),
             title=chunk.title,
             source=chunk.source,
-            snippet=chunk.content[:220],
+            snippet=llm_service.clean_display_text(chunk.content)[:220],
             score=chunk.score,
         )
         for chunk in chunks
@@ -92,6 +94,13 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 
     if should_use_web_fallback and used_web_fallback:
         confidence = max(confidence, 0.55)
+        grounded = True
+    elif confidence < settings.minimum_grounded_confidence:
+        grounded = False
+        answer = (
+            "I could not find enough grounded evidence in the indexed knowledge base to answer this safely. "
+            "Try narrowing the question, selecting a source filter, or ingesting more relevant documents."
+        )
 
     query_log = models.QueryLog(
         question=payload.question,
@@ -110,4 +119,6 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         confidence=confidence,
         latency_ms=latency_ms,
         query_log_id=str(query_log.id),
+        grounded=grounded,
+        applied_source_filters=source_filters,
     )

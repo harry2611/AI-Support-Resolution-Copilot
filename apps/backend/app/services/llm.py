@@ -246,6 +246,9 @@ class LLMService:
         except Exception:
             return self._fallback_ticket_draft(customer_message, context_blocks)
 
+    def clean_display_text(self, text: str) -> str:
+        return self._clean_display_text(text)
+
     def _hash_embedding(self, text: str) -> list[float]:
         dim = settings.embedding_dimensions
         vector = [0.0] * dim
@@ -262,15 +265,19 @@ class LLMService:
         return [value / magnitude for value in vector]
 
     def _fallback_context_answer(self, question: str, context_blocks: list[str]) -> str:
-        top_points = "\n".join(f"- {block[:200]}" for block in context_blocks[:3])
+        top_points = "\n\n".join(self._format_context_block(block) for block in context_blocks[:3])
         return (
-            f"Based on the indexed knowledge base, here is a grounded response to: '{question}'.\n"
-            f"Key evidence:\n{top_points}\n"
-            "Suggested next step: validate this with account-specific logs before sending to the customer."
+            f"Here are the closest grounded matches I found for: \"{question}\"\n\n"
+            f"{top_points}\n\n"
+            "Suggested next step: narrow the question or apply a source filter if you want a more precise answer."
         )
 
     def _fallback_ticket_draft(self, customer_message: str, context_blocks: list[str]) -> str:
-        context_hint = context_blocks[0][:250] if context_blocks else "No matching runbook was retrieved."
+        context_hint = (
+            self._clean_display_text(self._extract_context_content(context_blocks[0]))[:280]
+            if context_blocks
+            else "No matching runbook was retrieved."
+        )
         return (
             "Hi,\n\n"
             "Thanks for reporting this issue. I understand the impact and I’m here to help.\n\n"
@@ -378,3 +385,38 @@ class LLMService:
                 seen.add(str(url))
 
         return refs
+
+    def _format_context_block(self, block: str) -> str:
+        header, content = self._split_context_block(block)
+        title, source = self._parse_context_header(header)
+        summary = self._clean_display_text(content)[:260]
+        if len(content) > 260:
+            summary = summary.rstrip() + "..."
+        return f"- {title} ({source})\n  {summary}"
+
+    def _split_context_block(self, block: str) -> tuple[str, str]:
+        if "\n" not in block:
+            return block, block
+        header, content = block.split("\n", 1)
+        return header, content
+
+    def _parse_context_header(self, header: str) -> tuple[str, str]:
+        cleaned = header.strip().strip("[]")
+        parts = [part.strip() for part in cleaned.split("|")]
+        title = parts[0] if parts else "Indexed source"
+        source = parts[1] if len(parts) > 1 else "Knowledge base"
+        return title, source
+
+    def _extract_context_content(self, block: str) -> str:
+        _, content = self._split_context_block(block)
+        return content
+
+    def _clean_display_text(self, text: str) -> str:
+        cleaned = text.replace("\u2022", "\n- ").replace("•", "\n- ").replace("\u00a0", " ")
+        cleaned = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", cleaned)
+        cleaned = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", cleaned)
+        cleaned = re.sub(r"(?<=[a-zA-Z])(?=\d)", " ", cleaned)
+        cleaned = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", cleaned)
+        cleaned = re.sub(r"([.,;:!?])(?=[A-Za-z])", r"\1 ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        return cleaned.strip()

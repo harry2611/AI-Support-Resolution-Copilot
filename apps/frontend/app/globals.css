@@ -93,6 +93,12 @@ textarea {
   resize: vertical;
 }
 
+input[type="file"] {
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+}
+
 button {
   border: none;
   background: var(--primary);
@@ -114,6 +120,22 @@ button:disabled {
   border-radius: 12px;
   padding: 12px;
   margin-top: 10px;
+}
+
+.response-body,
+.snippet-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.response-body {
+  margin: 10px 0 12px;
+}
+
+.snippet-body {
+  margin: 8px 0 0;
 }
 
 .meta {
@@ -142,6 +164,17 @@ button:disabled {
   border-bottom: 0;
 }
 
+.section-divider {
+  margin: 18px 0 14px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .feedback-row {
   display: flex;
   gap: 8px;
@@ -155,6 +188,39 @@ button:disabled {
 .feedback-row button {
   background: #dbe8ff;
   color: #143378;
+}
+
+.source-filter-box {
+  margin: 10px 0 14px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.source-filter-title {
+  margin: 0 0 10px;
+}
+
+.source-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.source-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 500;
+}
+
+.source-filter-item input[type="checkbox"] {
+  width: auto;
+  margin: 0;
 }
 
 .eval-run-form {
@@ -175,6 +241,11 @@ button:disabled {
 
 .status-ok {
   color: var(--good);
+  font-weight: 700;
+}
+
+.status-warn {
+  color: #b96500;
   font-weight: 700;
 }
 

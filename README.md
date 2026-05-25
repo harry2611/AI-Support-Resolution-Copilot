@@ -1,21 +1,20 @@
 # AI Support Resolution Copilot
 
-Full-stack, resume-ready project that combines:
-- LLM-powered support workflows
-- Hybrid RAG (vector + lexical retrieval)
-- Evaluation pipelines for retrieval and answer quality
-- Human-in-the-loop ticket drafting
-- Frontend + backend + database + deployment
+ResolveAI is a full-stack semantic search and support-resolution platform built with `Next.js`, `FastAPI`, `PostgreSQL + pgvector`, `LangChain`, and Docker. It ingests internal knowledge, supports file uploads and connector syncs, answers natural-language questions with grounded citations, drafts support responses, and benchmarks retrieval quality through an integrated evaluation lab.
 
 ## Screenshots
 
-### Workspace UI
+### Workspace Overview
 
-![Workspace UI](output/playwright/workspace-ui.png)
+![Workspace Overview](output/playwright/workspace-overview.png)
 
-### Admin + Connector Sync UI
+### Grounded Answer + Source Filters
 
-![Admin UI](output/playwright/admin-ui.png)
+![Grounded Answer + Source Filters](output/playwright/workspace-grounded-answer.png)
+
+### Admin Dashboard + Evaluation Lab
+
+![Admin Dashboard + Evaluation Lab](output/playwright/admin-eval-lab.png)
 
 ## Architecture
 
@@ -26,12 +25,14 @@ Full-stack, resume-ready project that combines:
 ## Core Features
 
 1. Document ingestion (`/api/ingest/documents`) with automatic chunking and embedding.
-2. Hybrid retrieval (`semantic + full-text`) with reciprocal rank fusion.
-3. Copilot chat (`/api/chat`) that returns answer + citations + confidence + latency, with automatic web fallback when internal confidence is low.
-4. Ticket draft generation (`/api/tickets/draft`) for support responses.
-5. Connector sync for Confluence + Notion with scheduled incremental ingestion.
-6. Ops metrics (`/api/metrics`) and feedback capture (`/api/feedback`).
-7. Evaluation Lab (`/api/evals/*`) for benchmark cases, retrieval hit rate, precision@k, recall@k, answer coverage, grounding score, and heuristic hallucination risk.
+2. File upload ingestion (`/api/ingest/upload`) for `.txt`, `.md`, `.pdf`, and `.docx` documents.
+3. Hybrid retrieval (`semantic + full-text`) with reciprocal rank fusion.
+4. Copilot chat (`/api/chat`) that returns answer + citations + confidence + latency, with low-confidence blocking and optional web fallback.
+5. Ticket draft generation (`/api/tickets/draft`) for support responses with grounded-evidence guardrails.
+6. Connector sync for Confluence + Notion with scheduled incremental ingestion.
+7. Ops metrics (`/api/metrics`) and feedback capture (`/api/feedback`).
+8. Evaluation Lab (`/api/evals/*`) for benchmark cases, retrieval hit rate, precision@k, recall@k, answer coverage, grounding score, and heuristic hallucination risk.
+9. Source-filtered retrieval, reranking, and low-confidence guardrails to block weak answers and weak customer drafts.
 
 ## Local Run (Docker)
 
@@ -57,10 +58,21 @@ Services:
 
 ### 3) Use the app
 
-1. Ingest a support document from the home page.
-2. Ask a support question to validate citation-grounded retrieval.
-3. Generate a ticket draft from a customer message.
-4. Open `/admin` to see KPIs.
+1. Paste a support document or upload a `.txt`, `.md`, `.pdf`, or `.docx` file from the home page.
+2. Use source filters to narrow retrieval to specific indexed sources.
+3. Ask a support question to validate citation-grounded retrieval and confidence handling.
+4. Generate a ticket draft from a customer message.
+5. Open `/admin` to monitor KPIs, connector sync, and evaluation runs.
+
+### File upload support
+
+From the workspace UI you can now upload:
+- `.txt`
+- `.md`
+- `.pdf`
+- `.docx`
+
+The backend extracts text, chunks it, embeds it, and stores it in Postgres/pgvector through the same ingestion pipeline used for pasted text.
 
 ## Connector Sync Setup
 
@@ -119,6 +131,14 @@ curl -X POST http://localhost:8000/api/ingest/documents \
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"question":"How should we debug webhook timeout failures?","top_k":6}'
+```
+
+```bash
+curl -X POST http://localhost:8000/api/ingest/upload \
+  -F "file=@/absolute/path/to/runbook.pdf" \
+  -F "title=Webhook Timeout Runbook" \
+  -F "source=Uploaded PDF" \
+  -F "tags=webhooks,incident,runbook"
 ```
 
 ## Evaluation Lab

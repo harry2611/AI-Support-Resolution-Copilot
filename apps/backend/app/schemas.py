@@ -19,6 +19,13 @@ class IngestResponse(BaseModel):
     ingested_chunks: int
 
 
+class DocumentSummary(BaseModel):
+    title: str
+    source: str
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
 class Citation(BaseModel):
     chunk_id: str
     title: str
@@ -30,6 +37,7 @@ class Citation(BaseModel):
 class ChatRequest(BaseModel):
     question: str = Field(min_length=3)
     top_k: int = Field(default=6, ge=1, le=12)
+    source_filters: list[str] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):
@@ -38,17 +46,22 @@ class ChatResponse(BaseModel):
     confidence: float
     latency_ms: int
     query_log_id: str
+    grounded: bool
+    applied_source_filters: list[str] = Field(default_factory=list)
 
 
 class TicketDraftRequest(BaseModel):
     customer_message: str = Field(min_length=3)
     top_k: int = Field(default=6, ge=1, le=12)
+    source_filters: list[str] = Field(default_factory=list)
 
 
 class TicketDraftResponse(BaseModel):
     draft_id: str
     response: str
     citations: list[Citation]
+    grounded: bool
+    applied_source_filters: list[str] = Field(default_factory=list)
 
 
 class FeedbackRequest(BaseModel):

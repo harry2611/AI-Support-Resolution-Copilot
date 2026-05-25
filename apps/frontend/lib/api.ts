@@ -12,12 +12,23 @@ export type ChatResponse = {
   confidence: number;
   latency_ms: number;
   query_log_id: string;
+  grounded: boolean;
+  applied_source_filters: string[];
 };
 
 export type TicketDraftResponse = {
   draft_id: string;
   response: string;
   citations: Citation[];
+  grounded: boolean;
+  applied_source_filters: string[];
+};
+
+export type DocumentSummary = {
+  title: string;
+  source: string;
+  tags: string[];
+  created_at: string;
 };
 
 export type MetricsResponse = {
@@ -134,17 +145,42 @@ export async function ingestDocument(payload: {
   });
 }
 
-export async function askQuestion(question: string, top_k = 6) {
+export async function ingestFile(payload: {
+  file: File;
+  title?: string;
+  source?: string;
+  tags?: string[];
+}) {
+  const formData = new FormData();
+  formData.append("file", payload.file);
+  if (payload.title?.trim()) formData.append("title", payload.title.trim());
+  if (payload.source?.trim()) formData.append("source", payload.source.trim());
+  if (payload.tags?.length) formData.append("tags", payload.tags.join(","));
+
+  const response = await fetch(`${API_URL}/api/ingest/upload`, {
+    method: "POST",
+    body: formData
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Request failed: ${response.status}`);
+  }
+
+  return (await response.json()) as { ingested_documents: number; ingested_chunks: number };
+}
+
+export async function askQuestion(question: string, top_k = 6, source_filters: string[] = []) {
   return apiFetch<ChatResponse>("/api/chat", {
     method: "POST",
-    body: JSON.stringify({ question, top_k })
+    body: JSON.stringify({ question, top_k, source_filters })
   });
 }
 
-export async function draftTicket(customer_message: string, top_k = 6) {
+export async function draftTicket(customer_message: string, top_k = 6, source_filters: string[] = []) {
   return apiFetch<TicketDraftResponse>("/api/tickets/draft", {
     method: "POST",
-    body: JSON.stringify({ customer_message, top_k })
+    body: JSON.stringify({ customer_message, top_k, source_filters })
   });
 }
 
@@ -172,6 +208,10 @@ export async function fetchSyncRuns(limit = 20) {
 
 export async function fetchSyncStatus() {
   return apiFetch<SyncStatus>("/api/sync/status");
+}
+
+export async function fetchDocumentCatalog() {
+  return apiFetch<DocumentSummary[]>("/api/ingest/catalog");
 }
 
 export async function createEvalCases(cases: Array<{
